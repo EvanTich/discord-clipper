@@ -1,0 +1,18 @@
+{
+  "name": "discord-clipper",
+  "version": "1.0.0",
+  "description": "A bot that clips. I am the one who clips.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Evan Tichenor (evan.tichenor@gmail.com)",
+  "license": "ISC",
+  "dependencies": {
+    "@discordjs/voice": "^0.16.1",
+    "@discordjs/opus": "^0.9.0",
+    "discord.js": "^14.14.1",
+    "libsodium-wrappers": "^0.7.13",
+    "queue-typed": "^1.51.9"
+  }
+}
