@@ -18,7 +18,13 @@
  * TODO: circular buffer for storing clip queue
  * TODO: clip command with duration
  * TODO: store more audio, allow clipping from any point
+ * TODO (QA): allow a clip w/ everybody
  * TODO: backend database for storing guild settings
+ * FIXME (QA): should say something about summoning him before trying to clip a member
+ * FIXME (QA): add help command
+ * FIXME (QA): distortions in audio (this may be due to the async on the receiver's speaking map) NEED TO TEST
+ * TODO (QA): add silence
+ * TODO (QA): make bot leave if nobody is in the chat 
  */
 
 const { Queue } = require('queue-typed');
@@ -29,7 +35,8 @@ const { joinVoiceChannel, EndBehaviorType } = require('@discordjs/voice');
 const { token } = require('./token.js');
 const config = require('./config.js');
 
-const DURATION = false;
+const SHOW_CONVERSION_TIME = false;
+const SHOW_PACKETS = false;
 
 /**
  * Contains main header for RIFF WAVE files.
@@ -134,6 +141,11 @@ class GuildInfo {
         this.settings = {
             maxClipSize: MAX_CLIP_SIZE
         };
+
+        /**
+         * @type {NodeJS.Timeout}
+         */
+        this.channelTimeout = null;
     }
 
     get inChannel() {
@@ -159,6 +171,11 @@ class GuildInfo {
             return true;
         }
         return false;
+    }
+
+    updateTimeout() {
+        clearTimeout(this.channelTimeout);
+        this.channelTimeout = setTimeout(this.disconnect, config.voiceReceiverTimeout);
     }
 }
 
@@ -204,7 +221,7 @@ function createWAV(guildInfo, userId) {
     let rawPCM = data.toPCM();
     let wavData = pcmToWAV(rawPCM);
     
-    if (DURATION) {
+    if (SHOW_CONVERSION_TIME) {
         console.debug('time taken: ', (Date.now() - start));
     }
 
@@ -280,20 +297,27 @@ async function joinChannel(channel) {
 
     // when people start talking
     const receiver = connection.receiver;
-    receiver.speaking.on('start', async userId => {
+    receiver.speaking.on('start', userId => {
         // if we already have a subscription for them, stop
         if (receiver.subscriptions.has(userId)) {
             return;
         }
-
+        let sub = receiver.subscribe(userId, voiceReceiverOptions);
         let userClips = guildInfo.addUser(userId);
 
         // otherwise, create a new subscription and start reading opus packets
-        receiver.subscribe(userId, voiceReceiverOptions).on('data', opusPacket => {
+        sub.on('data', opusPacket => {
             let data = OPUS.decode(opusPacket);
             userClips.add(data);
+
+            if (SHOW_PACKETS) {
+                console.debug('encoded:', opusPacket);
+                console.debug('decoded:', data);
+            }
         });
     });
+
+    // guildInfo.channelTimeout = setTimeout()
 
     // remember to add the info to our info object
     guildInfo.channel = channel;
@@ -399,7 +423,7 @@ client.on(Discord.Events.ClientReady, async client => {
     if (config.autoJoinEnabled) {
         setInterval(() => {
             joinChannelIf(client, config.joinChannelCondition);
-        }, config.autoJoinMS);
+        }, config.autoJoinInterval);
     }
 });
 

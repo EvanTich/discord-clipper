@@ -19,7 +19,8 @@ module.exports = {
     maxClipDurationMS: 30000,
     voiceReceiverTimeout: 150000,
     prefix: '!clip',
-    autoJoinMS: 10000,
+    autoJoinInterval: 60000,
     joinChannelCondition: channelHasDeveloper,
     autoJoinEnabled: false,
+    autoLeaveInterval: 150000,
 }
