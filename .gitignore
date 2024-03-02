@@ -1,3 +1,4 @@
 node_modules
 token.*
 package-lock.json
+test*
