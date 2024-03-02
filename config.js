@@ -23,4 +23,6 @@ module.exports = {
     joinChannelCondition: channelHasDeveloper,
     autoJoinEnabled: false,
     autoLeaveInterval: 150000,
+    clipStorageDuration: 90000, // 1.5 minutes
+    testOpusPacketFile: 'test_opus_packets.json',
 }
