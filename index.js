@@ -272,19 +272,32 @@ function opusToPCM(opusPackets, duration, t0) {
         writeFile(config.testOpusPacketFile, JSON.stringify(opusPackets));
     }
 
+    // decode the opus packets within the duration to pcm (not exactly accurate, but good enough)
+    const pcmPackets = opusPackets
+        .filter(packet => packet.timestamp >= t0 && packet.timestamp <= t0 + duration)
+        .map(v => {
+            let chunk = OPUS.decode(v.chunk);
+            return {
+                timestampStart: v.timestamp - chunk.length / BYTES_PER_MS, 
+                timestampEnd: v.timestamp,
+                chunk: chunk
+            };
+        });
+
     // get the first packet timestamp that is greater than t0, and set t0 to that timestamp
-    opusPackets = opusPackets.filter(packet => packet.timestamp >= t0 && packet.timestamp <= t0 + duration);
-    t0 = opusPackets[0].timestamp
-    let last = opusPackets[opusPackets.length - 1];
+    // make sure to offset t0 because the timestamp is actually the end of the packet
+    t0 = pcmPackets[0].timestampStart;
+    let last = pcmPackets[pcmPackets.length - 1].timestampEnd;
 
     // create buffer from first and last timestamp instead of straight from the given duration
-    let data = Buffer.alloc((last.timestamp - t0) * BYTES_PER_MS + last.chunk.length);
+    let data = Buffer.alloc((last - t0) * BYTES_PER_MS);
 
     // put the packets where they need to be in the data array
-    for (let packet of opusPackets) {
-        // align our data with the samples in the data buffer
-        const dataOffset = Math.floor((packet.timestamp - t0) * BYTES_PER_MS / 4) * 4;
-        const pcm = OPUS.decode(packet.chunk);
+    for (let packet of pcmPackets) {
+        const pcm = packet.chunk;
+        const timestamp = packet.timestampStart;
+        // align our data with the L/R samples in the data buffer
+        const dataOffset = Math.floor((timestamp - t0) * BYTES_PER_MS / 4) * 4;
 
         // write each channel sample separately until there are no more
         let pcmOffset = 0;
