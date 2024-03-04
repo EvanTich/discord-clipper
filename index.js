@@ -432,6 +432,13 @@ async function leave(msg) {
     return false;
 }
 
+async function help(msg) {
+    return `Help: \`!clip [command]\`
+- \`join\`: Join the voice channel you are currently in
+- \`[mention user]\`: Create a clip of the mentioned user
+- \`leave\`: Leave the voice channel`;
+}
+
 function addGuildToMap(guildId) {
     if (!guildMap.get(guildId)) {
         guildMap.set(guildId, new GuildInfo(guildId));
@@ -450,6 +457,8 @@ async function parseMessage(msg) {
             return leave(msg);
         case 'join':
             return join(msg);
+        case 'help':
+            return help(msg);
         default:
             return sendClip(msg);
     }
