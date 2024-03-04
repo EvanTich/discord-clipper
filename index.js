@@ -177,10 +177,11 @@ class GuildInfo {
 
     /**
      * Disconnects the bot from this guild if there are no members in the voice channel.
+     * Also disconnects if the bot is not in the channel (kicked by somebody else).
      */
     checkTimeout() {
         let members = this.channel?.members?.filter(m => !m.user.bot);
-        if (members?.size > 0) {
+        if (members?.size > 0 && this.channel?.members?.find(m => m.user.id == config.botId)) {
             return;
         }
 
