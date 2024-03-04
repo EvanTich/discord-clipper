@@ -1,55 +1,5 @@
 /**
- * Discord clipper:
- * 1. join voice channel in guild
- * 2. create voice stream for each user (incl. when new users join)
- *    x raw pcm
- * 3. on data for user voice stream:
- *    - store in queue and remove the front of the queue when the length is too long
- *    - can check # of samples to compute time
- * 4. when user asks for clip
- *    - create WAV from raw pcm in queue
- *    - notify the recording length and if it was outside a certain bound
- *    ? store WAV as file "{user}-{time}.wav"
- *    - send to user in channel
- *
- * TODO: register and use slash commands (https://discordjs.guide/creating-your-bot/slash-commands.html)
- * TODO: per user settings
- * TODO: per server settings
- * TODO: circular buffer for storing clip queue
- * TODO: clip command with duration
- * TODO: store more audio, allow clipping from any point
- * TODO (QA): allow a clip w/ everybody
- * TODO: backend database for storing guild settings
- * FIXME (QA): should say something about summoning him before trying to clip a member
- * FIXME (QA): add help command
- * FIXME (QA): distortions in audio (this may be due to the async on the receiver's speaking map) NEED TO TEST
- * TODO (QA): add silence
- * TODO (QA): make bot leave if nobody is in the chat
- * TODO: special audio clip when people mention the bot for clipping
- */
-
-/**
- * New:
- * voice receiver streams
- * -> timestamp w/ packet
- * -> put in queue that clears out previous packets from x seconds ago
- * now we have a queue with timestamps and opus packets
- *
- * user ask for clip w/ mentioned users
- * -> collect opus packets for the mentioned users
- *    - only the previous y seconds of packets
- * -> create empty Uint8Array
- * -> get T-0 packet
- *    - will use to compute where the data should go
- * -> decode opus packets to PCM data when needed
- *    - FIXME? do we need to account for the length of the PCM data and the timestamp?
- *      i.e. subtract the number of milliseconds of the PCM data duration to the timestamp
- * -> we want to parse the 16-bit numbers out of the PCM data so we can do math on them if needed
- *    - convert 16-bit numbers [-32768, 32767] to floats [-1, 1] then back to 16-bit numbers
- *      ONLY IF NEEDED (overlapping audio packets)
- * -> when we exhaust all the packets, we are done parsing the PCM data
- * -> create WAV from PCM data
- * now we have an audio clip that we can send
+ * Main file for the discord clipper
  */
 
 const { Queue } = require('queue-typed');
@@ -176,7 +126,7 @@ class GuildInfo {
     constructor(guildId) {
         this.guildId = guildId;
         /**
-         * @type {Discord.Channel}
+         * @type {Discord.VoiceChannel}
          */
         this.channel = null;
         this.connection = null;
@@ -185,7 +135,8 @@ class GuildInfo {
          */
         this.userClips = new Map();
         this.settings = {
-            storageDuration: config.clipStorageDuration
+            storageDuration: config.clipStorageDuration,
+            voiceTimeout: config.voiceReceiverTimeout,
         };
 
         /**
@@ -209,19 +160,43 @@ class GuildInfo {
         return newClips;
     }
 
+    /**
+     * Disconnects from the current voice channel, if possible.
+     */
     disconnect() {
-        if (this.inChannel) {
-            this.connection.destroy();
-            this.channel = null;
-            this.connection = null;
-            return true;
+        if (!this.inChannel) {
+            return;
         }
-        return false;
+
+        clearInterval(this.channelTimeout);
+        this.channelTimeout = null;
+        this.connection.destroy();
+        this.channel = null;
+        this.connection = null;
     }
 
-    updateTimeout() {
-        clearTimeout(this.channelTimeout);
-        this.channelTimeout = setTimeout(this.disconnect, config.voiceReceiverTimeout);
+    /**
+     * Disconnects the bot from this guild if there are no members in the voice channel.
+     */
+    checkTimeout() {
+        let members = this.channel?.members?.filter(m => !m.user.bot);
+        if (members?.size > 0) {
+            return;
+        }
+
+        this.disconnect();
+    }
+
+    /**
+     * Starts an interval to check the timeout status of the voice connection.
+     * Automatically disconnects the bot from channels with nobody in them after a configurable amount of time.
+     */
+    startTimeout() {
+        if (this.channelTimeout) {
+            return;
+        }
+
+        this.channelTimeout = setInterval(() => this.checkTimeout(), this.settings.voiceTimeout);
     }
 }
 
@@ -425,11 +400,10 @@ async function joinChannel(channel) {
             .pipe(userClips, { end: false });
     });
 
-    // guildInfo.channelTimeout = setTimeout()
-
     // remember to add the info to our info object
     guildInfo.channel = channel;
     guildInfo.connection = connection;
+    guildInfo.startTimeout();
 
     return false;
 }
