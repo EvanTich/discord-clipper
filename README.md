@@ -1,15 +1,16 @@
 # Discord Clipper
-A Discord bot that can record users' voices. 
+A Discord bot that can record users' voices.
 [Here](https://discord.com/api/oauth2/authorize?client_id=1206806233957408770&permissions=274878991360&scope=bot%20applications.commands) is a join link.
 
 ## How It's Done
 1. Join a voice channel in a Discord server.
 2. Create voice stream for each user (incl. when new users join).
 3. When we get data (an OPUS packet) from the users' voice stream:
+   - Flag when users' start speaking using the speaking map
    - Timestamp the packet when we get it
    - Store in users' "clip queue"
    - Truncate the old packets from the clip queue
-4. When a user asks for clip:
+5. When a user asks for clip:
    - Convert the OPUS to raw PCM while keeping track of the start and end timestamps
    - Allocate a buffer to store PCM
    - Place the raw PCM in the correct place in the buffer using the starting timestamp
@@ -17,7 +18,7 @@ A Discord bot that can record users' voices.
    - Send the WAV file to the user
 
 ## Problems
-- Crackly audio
+- ~~Crackly audio~~
 
 
 ## TODO
@@ -37,3 +38,4 @@ A Discord bot that can record users' voices.
 - TODO: special audio clip when people mention the bot for clipping
 - TODO: move functions out to separate files (~~audio.js~~, commands/*.js)
     - need to adjust how data is moved around
+- TODO: support unicode in file names
