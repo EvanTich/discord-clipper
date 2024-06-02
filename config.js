@@ -18,7 +18,7 @@ function channelHasDeveloper(channel) {
 }
 
 module.exports = {
-    maxClipDurationMS: 30000,
+    maxClipDurationMS: 10000,
     voiceReceiverTimeout: 150000,
     prefix: '!clip',
     autoJoinInterval: 60000,
@@ -27,5 +27,8 @@ module.exports = {
     clipStorageDuration: 90000, // 1.5 minutes
     testOpusPacketFile: 'test_opus_packets.json',
     botId: '1206806233957408770',
-    developerId: developerId
+    developerId: developerId,
+    writeTestPackets: false,
+    showAudioConversionTime: false,
+    debuggingEnabled: false,
 }
