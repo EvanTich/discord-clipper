@@ -31,9 +31,9 @@ A Discord bot that can record users' voices.
 - TODO: backend database for storing guild settings
 - FIXME (QA): should say something about summoning him before trying to clip a member
 - ~~FIXME (QA): add help command~~
-- FIXME (QA): distortions in audio (this may be due to the async on the receiver's speaking map) NEED TO TEST
+- ~~FIXME (QA): distortions in audio (this may be due to the async on the receiver's speaking map)~~
 - ~~TODO (QA): add silence~~
 - ~~TODO (QA): make bot leave if nobody is in the chat~~
 - TODO: special audio clip when people mention the bot for clipping
-- TODO: move functions out to separate files (audio.js, commands/*.js)
+- TODO: move functions out to separate files (~~audio.js~~, commands/*.js)
     - need to adjust how data is moved around
