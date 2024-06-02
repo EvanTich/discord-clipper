@@ -4,48 +4,12 @@
 
 const { Queue } = require('queue-typed');
 const Discord = require('discord.js');
-const { OpusEncoder } = require('@discordjs/opus');
 const { joinVoiceChannel, EndBehaviorType } = require('@discordjs/voice');
 const { Transform, Writable } = require('stream');
 
 const { token } = require('./token.js');
 const config = require('./config.js');
-const { writeFile } = require('fs');
-
-const SHOW_CONVERSION_TIME = false;
-const WRITE_TEST_PACKETS = false;
-
-/**
- * Contains main header for RIFF WAVE files.
- * PCM audio, 48k audio sampling frequency, 2 audio channels
- * http://soundfile.sapp.org/doc/WaveFormat/ is helpful for understanding it.
- * @property {Buffer} TOP    bytes for 'RIFF', ChunkSize goes afterwards
- * @property {Buffer} MIDDLE bytes for rest of WAVE format, Subchunk2Size goes afterwards
- */
-const HEADERS = {
-    TOP: Buffer.from([
-        0x52, 0x49, 0x46, 0x46  // 'RIFF'
-    ]),
-    MIDDLE: Buffer.from([
-        0x57, 0x41, 0x56, 0x45, // 'WAVE'
-        0x66, 0x6D, 0x74, 0x20, // 'fmt '
-        0x10, 0x00, 0x00, 0x00, // 16 for PCM
-        0x01, 0x00,             // PCM = 1
-        0x02, 0x00,             // Stereo = 2
-        0x80, 0xBB, 0x00, 0x00, // sample rate
-        0x00, 0xEE, 0x02, 0x00, // byte rate
-        0x04, 0x00,             // block align
-        0x10, 0x00,             // bits per sample = 16 bits
-        0x64, 0x61, 0x74, 0x61  // 'data'
-    ])
-};
-const HEADER_LENGTH = HEADERS.TOP.length + HEADERS.MIDDLE.length;
-const HEADER_LENGTH_LESS = HEADER_LENGTH - 8; // size of file not including the chunk ID and chunk size
-const BYTES_PER_MS = 192; // 192 = sampling rate (48k) * bytes in a sample (4)
-const MAX_16_BIT_SIGNED = 32767;
-const MIN_16_BIT_SIGNED = -32768;
-
-const OPUS = new OpusEncoder(48000, 2);
+const { opusToPCM, pcmToWAV } = require('./audio.js');
 
 /**
  * Holds all guilds that have used this bot.
@@ -54,23 +18,19 @@ const OPUS = new OpusEncoder(48000, 2);
 const guildMap = new Map();
 
 /**
- * @param {Buffer} wavData wav data buffer
- * @returns {number} WAV duration in milliseconds
- */
-function getWAVDuration(wavData) {
-    return (wavData.length - HEADER_LENGTH) / BYTES_PER_MS;
-}
-
-/**
  * @typedef TimestampedOpusPacket
  * @property {number} timestamp
  * @property {Buffer} chunk
+ * @property {boolean} isStart
+ */
+/**
+ * @returns {Transform} transformer that creates and emits {@link TimestampedOpusPackets}
  */
 function createTimestamper() {
     return new Transform({
         objectMode: true,
         transform(chunk, encoding, callback) {
-            callback(null, {timestamp: Date.now(), chunk});
+            callback(null, {timestamp: Date.now(), chunk, isStart: false});
         }
     });
 }
@@ -94,6 +54,9 @@ class ClipQueue extends Writable {
      * @param {TimestampedOpusPacket} data
      */
     add(data) {
+        if (data == undefined || data == null) {
+            return;
+        }
         this.queue.push(data);
         this.truncate(data.timestamp);
     }
@@ -107,6 +70,10 @@ class ClipQueue extends Writable {
                 && this.queue.first.timestamp + this.storageDuration < latestTimestamp) {
             this.queue.shift();
         }
+    }
+
+    flagSpeakingStart() {
+        this.add({timestamp: Date.now(), chunk: null, isStart: true});
     }
 
     /**
@@ -202,93 +169,6 @@ class GuildInfo {
 }
 
 /**
- * Creates a buffer with a 32-bit little-endian number written inside.
- * @param {number} size the number to write in the buffer
- * @returns {Buffer} a buffer with a 32-bit little-endian number written inside
- */
-function sizeBuffer(size) {
-    let buf = Buffer.alloc(4);
-    buf.writeUInt32LE(size);
-    return buf;
-}
-
-/**
- * Creates WAV data from the given raw PCM data.
- * @param {Buffer} rawPCM the raw PCM data for this WAV
- * @returns the buffer with the WAV data
- */
-function pcmToWAV(rawPCM) {
-    return Buffer.concat([
-        HEADERS.TOP,
-        sizeBuffer(HEADER_LENGTH_LESS + rawPCM.length),
-        HEADERS.MIDDLE,
-        sizeBuffer(rawPCM.length),
-        Buffer.from(rawPCM)
-    ]);
-}
-
-function clamp16(value) {
-    if (value < MIN_16_BIT_SIGNED) {
-        return MIN_16_BIT_SIGNED;
-    }
-    if (value > MAX_16_BIT_SIGNED) {
-        return MAX_16_BIT_SIGNED;
-    }
-    return value;
-}
-
-/**
- * Converts any OPUS packets within the clip duration, starting from t0, to PCM data.
- * @param {TimestampedOpusPacket[]} opusPackets
- * @param {number} duration
- * @param {number} t0 the start of the clip
- */
-function opusToPCM(opusPackets, duration, t0) {
-    if (WRITE_TEST_PACKETS) {
-        writeFile(config.testOpusPacketFile, JSON.stringify(opusPackets));
-    }
-
-    // decode the opus packets within the duration to pcm (not exactly accurate, but good enough)
-    const pcmPackets = opusPackets
-        .filter(packet => packet.timestamp >= t0 && packet.timestamp <= t0 + duration)
-        .map(v => {
-            let chunk = OPUS.decode(v.chunk);
-            return {
-                timestampStart: v.timestamp - chunk.length / BYTES_PER_MS, 
-                timestampEnd: v.timestamp,
-                chunk: chunk
-            };
-        });
-
-    // get the first packet timestamp that is greater than t0, and set t0 to that timestamp
-    // make sure to offset t0 because the timestamp is actually the end of the packet
-    t0 = pcmPackets[0].timestampStart;
-    let last = pcmPackets[pcmPackets.length - 1].timestampEnd;
-
-    // create buffer from first and last timestamp instead of straight from the given duration
-    let data = Buffer.alloc((last - t0) * BYTES_PER_MS);
-
-    // put the packets where they need to be in the data array
-    for (let packet of pcmPackets) {
-        const pcm = packet.chunk;
-        const timestamp = packet.timestampStart;
-        // align our data with the L/R samples in the data buffer
-        const dataOffset = Math.floor((timestamp - t0) * BYTES_PER_MS / 4) * 4;
-
-        // write each channel sample separately until there are no more
-        let pcmOffset = 0;
-        while (pcmOffset < pcm.length && dataOffset + pcmOffset < data.length - 1) {
-            let num = pcm.readInt16LE(pcmOffset);
-            let dataNum = data.readInt16LE(dataOffset + pcmOffset)
-            data.writeInt16LE(clamp16(num + dataNum), dataOffset + pcmOffset);
-            pcmOffset += 2;
-        }
-    }
-
-    return data;
-}
-
-/**
  * Creates WAV data from the given guild and user id if possible.
  * @param {GuildInfo} guildInfo the guild info to get the raw user PCM data from
  * @param {Discord.Snowflake} userId the user id
@@ -309,9 +189,12 @@ function createWAV(guildInfo, userId) {
 
     // TODO: allow user to specify clip duration and t0
     let pcmData = opusToPCM(opusPackets, config.maxClipDurationMS, start - config.maxClipDurationMS);
+    if (pcmData == null) {
+        return null;
+    }
     let wavData = pcmToWAV(pcmData);
 
-    if (SHOW_CONVERSION_TIME) {
+    if (config.showAudioConversionTime) {
         console.debug('time taken: ', (Date.now() - start));
     }
 
@@ -363,7 +246,9 @@ async function joinChannel(channel) {
     const guildInfo = guildMap.get(guildId);
 
     // make sure the bot isn't already in the channel
-    if (guildInfo.inChannel && guildInfo.channel.id == channel.id) {
+    if (guildInfo.inChannel
+            && guildInfo.channel.id == channel.id
+            && guildInfo.channel.members.has(client.user.id)) {
         return 'I\'m already connected!';
     }
 
@@ -387,7 +272,20 @@ async function joinChannel(channel) {
 
     // when people start talking
     const receiver = connection.receiver;
+    if (config.debuggingEnabled) {
+        connection.on('debug', msg => console.log('conn debug:', msg));
+        connection.on('stateChange', (o, n) => console.log(n));
+        connection.state.networking?.on('debug', console.log);
+        let origOnWsPacket = receiver.onWsPacket;
+        receiver.onWsPacket = packet => {
+            console.log(packet);
+            origOnWsPacket(packet);
+        }
+    }
+
     receiver.speaking.on('start', userId => {
+        let userClips = guildInfo.getUserQueue(userId);
+        userClips.flagSpeakingStart();
         // FIXME: might need to lock the thread while we check/create the subscription
         // if we already have a subscription for them, stop
         if (receiver.subscriptions.has(userId)) {
@@ -396,7 +294,6 @@ async function joinChannel(channel) {
 
         // otherwise, create a new subscription and start reading opus packets
         let sub = receiver.subscribe(userId, voiceReceiverOptions);
-        let userClips = guildInfo.getUserQueue(userId);
         sub.pipe(createTimestamper())
             .pipe(userClips, { end: false });
     });
