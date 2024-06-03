@@ -4,10 +4,10 @@
   "description": "A bot that clips. I am the one who clips.",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node test.js"
   },
   "author": "Evan Tichenor (evan.tichenor@gmail.com)",
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
     "@discordjs/voice": "^0.16.1",
     "@discordjs/opus": "^0.9.0",

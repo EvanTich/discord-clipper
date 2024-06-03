@@ -82,11 +82,8 @@ function opusToPCM(opusPackets, duration, t0) {
     let currentPCM = null; // {timestampStart, timestampEnd, chunks}
     let lastTimestamp;
     for (let packet of opusPackets) {
-        if (packet.timestamp < t0) {
+        if (packet.timestamp < t0 || packet.timestamp > t0 + duration) {
             continue;
-        }
-        if (packet.timestamp > t0 + duration) {
-            break;
         }
 
         if (packet.isStart || currentPCM === null) {
