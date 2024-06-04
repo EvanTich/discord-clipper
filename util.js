@@ -2,7 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const { Queue } = require('queue-typed');
 const { Writable } = require('stream');
-const { Collection, SlashCommandBuilder } = require('discord.js');
+const { Collection, SlashCommandBuilder, Snowflake, VoiceChannel } = require('discord.js');
+
 const config = require('./config.js');
 
 /**
@@ -72,17 +73,17 @@ class ClipQueue extends Writable {
 class GuildInfo {
 
     /**
-     * @param {Discord.Snowflake} guildId
+     * @param {Snowflake} guildId
      */
     constructor(guildId) {
         this.guildId = guildId;
         /**
-         * @type {Discord.VoiceChannel}
+         * @type {VoiceChannel}
          */
         this.channel = null;
         this.connection = null;
         /**
-         * @type {Map<Discord.Snowflake, ClipQueue>}
+         * @type {Map<Snowflake, ClipQueue>}
          */
         this.userClips = new Map();
         this.settings = {

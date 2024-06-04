@@ -1,5 +1,3 @@
-const config = require('./config.js');
-const { writeFile, writeFileSync } = require('fs');
 const { OpusEncoder } = require('@discordjs/opus');
 
 /**
@@ -31,7 +29,6 @@ const HEADER_LENGTH_LESS = HEADER_LENGTH - 8; // size of file not including the 
 const BYTES_PER_MS = 192; // 192 = sampling rate (48k) * bytes in a sample (4)
 
 const OPUS = new OpusEncoder(48000, 2);
-const MIN_DISTANCE_MS = 250;
 
 /**
  * Creates a buffer with a 32-bit little-endian number written inside.
@@ -73,14 +70,11 @@ function mix16(a, b) {
  * @param {number} t0 the start of the clip
  */
 function opusToPCM(opusPackets, duration, t0) {
-    if (config.writeTestPackets) {
-        writeFileSync(config.testOpusPacketFile, JSON.stringify(opusPackets), err => err ?? console.debug(err));
-    }
-
     // decode the opus packets within the duration to pcm (not exactly accurate, but good enough)
     const pcmPackets = [];
-    let currentPCM = null; // {timestampStart, timestampEnd, chunks}
-    let lastTimestamp;
+    let currentPCM = null; // {timestampStart, chunks}
+    let firstTimestamp = t0;
+    let lastTimestamp = t0;
     for (let packet of opusPackets) {
         if (packet.timestamp < t0 || packet.timestamp > t0 + duration) {
             continue;
@@ -90,7 +84,8 @@ function opusToPCM(opusPackets, duration, t0) {
             if (currentPCM !== null) {
                 pcmPackets.push(currentPCM);
             }
-            lastTimestamp = packet.timestamp;
+            firstTimestamp = Math.min(firstTimestamp, packet.timestamp);
+            lastTimestamp = Math.max(lastTimestamp, packet.timestamp);
             currentPCM = {
                 timestampStart: packet.timestamp,
                 chunks: []
@@ -100,7 +95,8 @@ function opusToPCM(opusPackets, duration, t0) {
 
         let chunk = OPUS.decode(packet.chunk);
         currentPCM.chunks.push(chunk);
-        lastTimestamp = packet.timestamp;
+        firstTimestamp = Math.min(firstTimestamp, packet.timestamp - chunk.length / BYTES_PER_MS);
+        lastTimestamp = Math.max(lastTimestamp, packet.timestamp);
     }
     if (currentPCM !== null) {
         pcmPackets.push(currentPCM);
@@ -113,12 +109,8 @@ function opusToPCM(opusPackets, duration, t0) {
     // sanity check
     // return pcmPackets.map(v => v.chunks).reduce((a, b) => Buffer.concat([a, ...b]), Buffer.alloc(0));
 
-    // get the first packet timestamp that is greater than t0, and set t0 to that timestamp
-    // make sure to offset t0 because the timestamp is actually the end of the packet
-    t0 = pcmPackets[0].timestampStart;
-
     // create buffer from first and last timestamp instead of straight from the given duration
-    let data = Buffer.alloc(Math.floor((lastTimestamp - t0) * BYTES_PER_MS / 4) * 4);
+    let data = Buffer.alloc(Math.floor((lastTimestamp - firstTimestamp) * BYTES_PER_MS / 4) * 4);
 
     /*+---------------+---------------+-- - - --+---------------+
       |   SAMPLE 00   |   SAMPLE 01   |         |   SAMPLE  N   |
@@ -134,7 +126,7 @@ function opusToPCM(opusPackets, duration, t0) {
         const timestamp = packet.timestampStart;
 
         // align our data with the samples in the data buffer
-        const sampleNumber = Math.floor(Math.ceil((timestamp - t0) * BYTES_PER_MS) / 4);
+        const sampleNumber = Math.floor(Math.ceil((timestamp - firstTimestamp) * BYTES_PER_MS) / 4);
         const dataAlign = sampleNumber * 4;
 
         // write each channel sample separately until there are no more
